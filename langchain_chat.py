@@ -1,12 +1,12 @@
 import gradio as gr
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 import requests
 from bs4 import BeautifulSoup
 
 # Initialize Ollama Chat Model (supports tool calling)
-llm = ChatOllama(model="llama3.2:3b")
+llm = ChatOllama(model="llama3.1:8b")
 
 
 # Define web search function as a tool
@@ -33,14 +33,14 @@ def search_web(query: str) -> str:
         first_title = first_link.get_text().strip()
 
         # Extract actual URL from DuckDuckGo redirect
-        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=... # noqa
-        if 'uddg=' in first_url: # noqa
+        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=...  # noqa
+        if 'uddg=' in first_url:  # noqa
             import urllib.parse
-            # Extract the uddg parameter # noqa
+            # Extract the uddg parameter  # noqa
             parsed = urllib.parse.urlparse(first_url if first_url.startswith('http') else 'https:' + first_url)
             params = urllib.parse.parse_qs(parsed.query)
-            if 'uddg' in params: # noqa
-                actual_url = urllib.parse.unquote(params['uddg'][0]) # noqa
+            if 'uddg' in params:  # noqa
+                actual_url = urllib.parse.unquote(params['uddg'][0])  # noqa
                 print(f"Extracted actual URL: {actual_url}")
                 first_url = actual_url
 
@@ -102,9 +102,8 @@ llm_with_tools = llm.bind_tools([search_web])
 
 
 # Simple agent loop
-def run_agent(user_input: str) -> str:
+def run_agent(messages: list) -> str:
     """Run a simple agent loop that can use tools"""
-    messages: list = [HumanMessage(content=user_input)]
     max_iterations = 5
 
     for i in range(max_iterations):
@@ -156,7 +155,19 @@ def run_agent(user_input: str) -> str:
 # Chat function for Gradio
 def chat(message, history):
     try:
-        response = run_agent(message)
+        # Convert Gradio history to LangChain messages. Order is alternating human (e.g. 0) and AI (e.g. 1) messages.
+        messages = []
+        for chat_message in history:
+            if chat_message['role'] == 'user':
+                messages.append(HumanMessage(content=chat_message['content']))
+            elif chat_message['role'] == 'assistant':
+                messages.append(AIMessage(content=chat_message['content']))
+
+        # Add current message
+        messages.append(HumanMessage(content=message))
+
+        # Run agent with full conversation history
+        response = run_agent(messages)
         return response
     except Exception as e:
         return f"Error: {str(e)}"
