@@ -32,7 +32,19 @@ def search_web(query: str) -> str:
         first_url = first_link.get('href')
         first_title = first_link.get_text().strip()
 
-        # Fix relative URLs from DuckDuckGo
+        # Extract actual URL from DuckDuckGo redirect
+        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=...
+        if 'uddg=' in first_url:
+            import urllib.parse
+            # Extract the uddg parameter
+            parsed = urllib.parse.urlparse(first_url if first_url.startswith('http') else 'https:' + first_url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if 'uddg' in params:
+                actual_url = urllib.parse.unquote(params['uddg'][0])
+                print(f"Extracted actual URL: {actual_url}")
+                first_url = actual_url
+
+        # Fix relative URLs
         if first_url.startswith('//'):
             first_url = 'https:' + first_url
         elif first_url.startswith('/'):
@@ -41,8 +53,11 @@ def search_web(query: str) -> str:
         print(f"Fetching content from: {first_url}")
 
         try:
-            page_response = requests.get(first_url, headers=headers, timeout=10)
+            page_response = requests.get(first_url, headers=headers, timeout=10, allow_redirects=True)
             page_soup = BeautifulSoup(page_response.text, 'html.parser')
+
+            print(f"Final URL after redirects: {page_response.url}")
+            print(f"Status code: {page_response.status_code}")
 
             # Remove script and style elements
             for script in page_soup(["script", "style", "nav", "header", "footer"]):
@@ -50,6 +65,8 @@ def search_web(query: str) -> str:
 
             # Try to get main content
             paragraphs = page_soup.find_all('p')
+            print(f"Found {len(paragraphs)} paragraphs")
+
             content_parts = []
             for p in paragraphs[:8]:  # Get first 8 paragraphs
                 text = p.get_text().strip()
@@ -57,6 +74,7 @@ def search_web(query: str) -> str:
                     content_parts.append(text)
 
             content = ' '.join(content_parts)
+            print(f"Content length: {len(content)}")
 
             # Limit to reasonable length
             if len(content) > 1500:
