@@ -104,7 +104,7 @@ llm_with_tools = llm.bind_tools([search_web])
 # Simple agent loop
 def run_agent(user_input: str) -> str:
     """Run a simple agent loop that can use tools"""
-    messages: list = [HumanMessage(content=user_input)]
+    messages = [HumanMessage(content=user_input)]
     max_iterations = 5
 
     for i in range(max_iterations):
