@@ -1,7 +1,7 @@
 import gradio as gr
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 import requests
 from bs4 import BeautifulSoup
 
@@ -33,14 +33,14 @@ def search_web(query: str) -> str:
         first_title = first_link.get_text().strip()
 
         # Extract actual URL from DuckDuckGo redirect
-        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=...
-        if 'uddg=' in first_url:
+        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=... # noqa
+        if 'uddg=' in first_url: # noqa
             import urllib.parse
-            # Extract the uddg parameter
+            # Extract the uddg parameter # noqa
             parsed = urllib.parse.urlparse(first_url if first_url.startswith('http') else 'https:' + first_url)
             params = urllib.parse.parse_qs(parsed.query)
-            if 'uddg' in params:
-                actual_url = urllib.parse.unquote(params['uddg'][0])
+            if 'uddg' in params: # noqa
+                actual_url = urllib.parse.unquote(params['uddg'][0]) # noqa
                 print(f"Extracted actual URL: {actual_url}")
                 first_url = actual_url
 
@@ -104,7 +104,7 @@ llm_with_tools = llm.bind_tools([search_web])
 # Simple agent loop
 def run_agent(user_input: str) -> str:
     """Run a simple agent loop that can use tools"""
-    messages = [HumanMessage(content=user_input)]
+    messages: list = [HumanMessage(content=user_input)]
     max_iterations = 5
 
     for i in range(max_iterations):
