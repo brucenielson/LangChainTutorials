@@ -1,198 +1,155 @@
 import gradio as gr
+import requests
+import urllib.parse
+from bs4 import BeautifulSoup
+
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
-import requests
-from bs4 import BeautifulSoup
-import urllib.parse
 
-# Define web search function as a tool
-@tool
-def search_web(query: str, debug: bool = False) -> str:
-    """Search the web for current information. Use this when you need up-to-date facts."""
-    try:
-        # Get search results
-        search_url = f"https://html.duckduckgo.com/html/?q={query}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        search_response = requests.get(search_url, headers=headers, timeout=10)
-        search_soup = BeautifulSoup(search_response.text, 'html.parser')
 
-        # Get first few results
-        result_links = search_soup.find_all('a', class_='result__a', limit=3)
-        if not result_links:
-            return "No results found"
-
-        # Try to get content from the first result
-        first_link = result_links[0]
-        first_url = first_link.get('href')
-        first_title = first_link.get_text().strip()
-
-        # Extract actual URL from DuckDuckGo redirect
-        # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=...  # noqa
-        if 'uddg=' in first_url:  # noqa
-            # Extract the uddg parameter  # noqa
-            parsed = urllib.parse.urlparse(first_url if first_url.startswith('http') else 'https:' + first_url)
-            params = urllib.parse.parse_qs(parsed.query)
-            if 'uddg' in params:  # noqa
-                actual_url = urllib.parse.unquote(params['uddg'][0])  # noqa
-                print_debug(f"Extracted actual URL: {actual_url}", debug=debug)
-                first_url = actual_url
-
-        # Fix relative URLs
-        if first_url.startswith('//'):
-            first_url = 'https:' + first_url
-        elif first_url.startswith('/'):
-            first_url = 'https://duckduckgo.com' + first_url
-
-        print_debug(f"Fetching content from: {first_url}", debug=debug)
-
-        try:
-            page_response = requests.get(first_url, headers=headers, timeout=10, allow_redirects=True)
-            page_soup = BeautifulSoup(page_response.text, 'html.parser')
-
-            print_debug(f"Final URL after redirects: {page_response.url}", debug=debug)
-            print_debug(f"Status code: {page_response.status_code}", debug=debug)
-
-            # Remove script and style elements
-            for script in page_soup(["script", "style", "nav", "header", "footer"]):
-                script.decompose()
-
-            # Try to get main content
-            paragraphs = page_soup.find_all('p')
-            print_debug(f"Found {len(paragraphs)} paragraphs", debug=debug)
-
-            content_parts = []
-            for p in paragraphs[:8]:  # Get first 8 paragraphs
-                text = p.get_text().strip()
-                if len(text) > 50:  # Only substantial paragraphs
-                    content_parts.append(text)
-
-            content = ' '.join(content_parts)
-            print_debug(f"Content length: {len(content)}", debug=debug)
-
-            # Limit to reasonable length
-            if len(content) > 1500:
-                content = content[:1500] + "..."
-
-            if content and len(content) > 100:
-                return f"Source: {first_title}\n\n{content}"
-            else:
-                # Fallback to just listing results
-                titles = [link.get_text().strip() for link in result_links]
-                return "Search results: " + " | ".join(titles)
-
-        except Exception as fetch_error:
-            print_debug(f"Could not fetch page content: {fetch_error}", debug=debug)
-            # Fallback to just listing results
-            titles = [link.get_text().strip() for link in result_links]
-            return "Search results: " + " | ".join(titles)
-
-    except Exception as e:
-        return f"Search failed: {str(e)}"
-
-def print_debug(message: str, debug: bool = False):
+def print_debug(message: str, debug: bool):
     if debug:
         print(message)
+
+
+def normalize_duckduckgo_url(url: str, debug: bool) -> str:
+    if 'uddg=' in url:
+        parsed = urllib.parse.urlparse(
+            url if url.startswith('http') else 'https:' + url
+        )
+        params = urllib.parse.parse_qs(parsed.query)
+        if 'uddg' in params:
+            actual = urllib.parse.unquote(params['uddg'][0])
+            print_debug(f"Extracted actual URL: {actual}", debug)
+            return actual
+
+    if url.startswith('//'):
+        return 'https:' + url
+    if url.startswith('/'):
+        return 'https://duckduckgo.com' + url
+    return url
+
+
+def extract_page_content(html: str, debug: bool) -> str:
+    soup = BeautifulSoup(html, 'html.parser')
+
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
+
+    paragraphs = [
+        p.get_text().strip()
+        for p in soup.find_all('p')[:8]
+        if len(p.get_text(strip=True)) > 50
+    ]
+
+    print_debug(f"Found {len(paragraphs)} paragraphs", debug)
+
+    content = ' '.join(paragraphs)
+    if len(content) > 1500:
+        content = content[:1500] + "..."
+
+    print_debug(f"Content length: {len(content)}", debug)
+    return content
+
+
+@tool
+def search_web(query: str, debug: bool = False) -> str:
+    """Search the web for current information."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
+    try:
+        search_url = f"https://html.duckduckgo.com/html/?q={query}"
+        response = requests.get(search_url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        links = soup.find_all('a', class_='result__a', limit=3)
+        if not links:
+            return "No results found"
+
+        first = links[0]
+        title = first.get_text(strip=True)
+        url = normalize_duckduckgo_url(first.get('href'), debug)
+
+        print_debug(f"Fetching content from: {url}", debug)
+
+        page = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        print_debug(f"Final URL: {page.url}", debug)
+        print_debug(f"Status code: {page.status_code}", debug)
+
+        content = extract_page_content(page.text, debug)
+        if len(content) > 100:
+            return f"Source: {title}\n\n{content}"
+
+    except Exception as e:
+        print_debug(f"Search error: {e}", debug)
+
+    titles = [l.get_text(strip=True) for l in links]
+    return "Search results: " + " | ".join(titles)
+
 
 class ChatbotUI:
     def __init__(self, debug: bool = False):
         self.debug = debug
-        # Initialize Ollama Chat Model (supports tool calling)
-        llm = ChatOllama(model="llama3.1:8b")
-        # Bind tools to the model
-        self.llm = llm.bind_tools([search_web])
-
-    # Simple agent loop
-    def print_debug(self, message: str):
-        print_debug(message, debug=self.debug)
-
-    def format_tool_status(self, message: str) -> str:
-        return f"🔎 {message}"
+        self.llm = ChatOllama(model="llama3.1:8b").bind_tools([search_web])
 
     def run_agent(self, messages: list) -> str:
-        """Run a simple agent loop that can use tools"""
-        max_iterations = 5
         tool_updates = []
 
-        for i in range(max_iterations):
-            # Get response from LLM
+        for i in range(5):
             response = self.llm.invoke(messages)
             messages.append(response)
 
-            # Debug: check what we got
-            self.print_debug(f"Iteration {i}:")
-            self.print_debug(f"Response type: {type(response)}")
-            self.print_debug(f"Has tool_calls attr: {hasattr(response, 'tool_calls')}")
-            if hasattr(response, 'tool_calls'):
-                self.print_debug(f"Tool calls: {response.tool_calls}")
-            self.print_debug(f"Content: {response.content}")
+            # Improved debug
+            content = getattr(response, "content", "")
+            tool_calls = getattr(response, "tool_calls", [])
 
-            # Check if LLM wants to use a tool
-            if hasattr(response, 'tool_calls') and response.tool_calls:
-                for tool_call in response.tool_calls:
-                    # Execute the tool
-                    if tool_call['name'] == 'search_web':
-                        # Extract the query from args
-                        args = tool_call['args']
-                        self.print_debug(f"Raw args: {args}")
+            print_debug(f"Iteration {i} Debug:", self.debug)
+            print_debug(f"  Content: {repr(content)}", self.debug)
 
-                        if isinstance(args, dict):
-                            query = args.get('query', '')
-                        else:
-                            query = args
-
-                        self.print_debug(f"Searching for: {query}")
-
-                        # Record tool status for UI
-                        tool_updates.append(
-                            self.format_tool_status(f'Searching the web for: "{query}"')
-                        )
-
-                        # Call the function directly with the string
-                        result = search_web.func(query, debug=self.debug)
-                        self.print_debug(f"Search result: {result}")
-
-                        # Add tool result to messages
-                        messages.append(ToolMessage(
-                            content=result,
-                            tool_call_id=tool_call['id']
-                        ))
-                # Continue the loop to get the next response
-                continue
+            if tool_calls:
+                print_debug(f"  Tool calls detected:", self.debug)
+                for call in tool_calls:
+                    print_debug(f"    - Tool name: {call.get('name')}", self.debug)
+                    print_debug(f"      Args: {call.get('args')}", self.debug)
             else:
-                # No more tool calls, return the response
+                print_debug("  No tool calls.", self.debug)
+
+            if not getattr(response, "tool_calls", None):
                 if tool_updates:
                     return "\n".join(tool_updates) + "\n\n" + response.content
                 return response.content
 
+            for call in response.tool_calls:
+                if call["name"] != "search_web":
+                    continue
+
+                query = call["args"].get("query", "")
+                update_text = f"🔎 Searching the web for: \"{query}\""
+                tool_updates.append(update_text)
+                print_debug(update_text, self.debug)
+
+                result = search_web.func(query, debug=self.debug)
+                messages.append(
+                    ToolMessage(content=result, tool_call_id=call["id"])
+                )
+
         return "Max iterations reached"
 
-    # Chat function for Gradio
     def chat(self, message, history):
-        try:
-            # Convert Gradio history to LangChain messages
-            messages = []
-            for chat_message in history:
-                if chat_message['role'] == 'user':
-                    messages.append(HumanMessage(content=chat_message['content']))
-                elif chat_message['role'] == 'assistant':
-                    messages.append(AIMessage(content=chat_message['content']))
+        messages = []
 
-            # Add current message
-            messages.append(HumanMessage(content=message))
+        for m in history:
+            cls = HumanMessage if m["role"] == "user" else AIMessage
+            messages.append(cls(content=m["content"]))
 
-            # Run agent with full conversation history
-            response = self.run_agent(messages)
-            return response
-        except Exception as e:
-            return f"Error: {str(e)}"
-
+        messages.append(HumanMessage(content=message))
+        return self.run_agent(messages)
 
     def build_interface(self):
-        # Create Gradio interface
-        demo = gr.ChatInterface(
+        return gr.ChatInterface(
             fn=self.chat,
             title="AI Chatbot with Web Search",
             description="Ask me anything! I'll search the web if needed.",
@@ -200,14 +157,13 @@ class ChatbotUI:
                 "What's the weather like today?",
                 "Tell me about recent AI developments",
                 "What is LangChain?"
-            ]
+            ],
         )
-        return demo
+
 
 def main():
-    chatbot_ui = ChatbotUI(debug=False)
-    demo = chatbot_ui.build_interface()
-    demo.launch()
+    ChatbotUI(debug=True).build_interface().launch()
+
 
 if __name__ == "__main__":
     main()
