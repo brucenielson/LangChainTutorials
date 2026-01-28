@@ -8,7 +8,7 @@ import urllib.parse
 
 # Define web search function as a tool
 @tool
-def search_web(query: str) -> str:
+def search_web(query: str, debug: bool = False) -> str:
     """Search the web for current information. Use this when you need up-to-date facts."""
     try:
         # Get search results
@@ -37,7 +37,7 @@ def search_web(query: str) -> str:
             params = urllib.parse.parse_qs(parsed.query)
             if 'uddg' in params:  # noqa
                 actual_url = urllib.parse.unquote(params['uddg'][0])  # noqa
-                print(f"Extracted actual URL: {actual_url}")
+                print_debug(f"Extracted actual URL: {actual_url}", debug=debug)
                 first_url = actual_url
 
         # Fix relative URLs
@@ -46,14 +46,14 @@ def search_web(query: str) -> str:
         elif first_url.startswith('/'):
             first_url = 'https://duckduckgo.com' + first_url
 
-        print(f"Fetching content from: {first_url}")
+        print_debug(f"Fetching content from: {first_url}", debug=debug)
 
         try:
             page_response = requests.get(first_url, headers=headers, timeout=10, allow_redirects=True)
             page_soup = BeautifulSoup(page_response.text, 'html.parser')
 
-            print(f"Final URL after redirects: {page_response.url}")
-            print(f"Status code: {page_response.status_code}")
+            print_debug(f"Final URL after redirects: {page_response.url}", debug=debug)
+            print_debug(f"Status code: {page_response.status_code}", debug=debug)
 
             # Remove script and style elements
             for script in page_soup(["script", "style", "nav", "header", "footer"]):
@@ -61,7 +61,7 @@ def search_web(query: str) -> str:
 
             # Try to get main content
             paragraphs = page_soup.find_all('p')
-            print(f"Found {len(paragraphs)} paragraphs")
+            print_debug(f"Found {len(paragraphs)} paragraphs", debug=debug)
 
             content_parts = []
             for p in paragraphs[:8]:  # Get first 8 paragraphs
@@ -70,7 +70,7 @@ def search_web(query: str) -> str:
                     content_parts.append(text)
 
             content = ' '.join(content_parts)
-            print(f"Content length: {len(content)}")
+            print_debug(f"Content length: {len(content)}", debug=debug)
 
             # Limit to reasonable length
             if len(content) > 1500:
@@ -84,7 +84,7 @@ def search_web(query: str) -> str:
                 return "Search results: " + " | ".join(titles)
 
         except Exception as fetch_error:
-            print(f"Could not fetch page content: {fetch_error}")
+            print_debug(f"Could not fetch page content: {fetch_error}", debug=debug)
             # Fallback to just listing results
             titles = [link.get_text().strip() for link in result_links]
             return "Search results: " + " | ".join(titles)
@@ -92,15 +92,22 @@ def search_web(query: str) -> str:
     except Exception as e:
         return f"Search failed: {str(e)}"
 
+def print_debug(message: str, debug: bool = False):
+    if debug:
+        print(message)
 
 class ChatbotUI:
-    def __init__(self):
+    def __init__(self, debug: bool = False):
+        self.debug = debug
         # Initialize Ollama Chat Model (supports tool calling)
         llm = ChatOllama(model="llama3.1:8b")
         # Bind tools to the model
         self.llm = llm.bind_tools([search_web])
 
     # Simple agent loop
+    def print_debug(self, message: str):
+        print_debug(message, debug=self.debug)
+
     def run_agent(self, messages: list) -> str:
         """Run a simple agent loop that can use tools"""
         max_iterations = 5
@@ -111,12 +118,12 @@ class ChatbotUI:
             messages.append(response)
 
             # Debug: check what we got
-            print(f"Iteration {i}:")
-            print(f"Response type: {type(response)}")
-            print(f"Has tool_calls attr: {hasattr(response, 'tool_calls')}")
+            self.print_debug(f"Iteration {i}:")
+            self.print_debug(f"Response type: {type(response)}")
+            self.print_debug(f"Has tool_calls attr: {hasattr(response, 'tool_calls')}")
             if hasattr(response, 'tool_calls'):
-                print(f"Tool calls: {response.tool_calls}")
-            print(f"Content: {response.content}")
+                self.print_debug(f"Tool calls: {response.tool_calls}")
+            self.print_debug(f"Content: {response.content}")
 
             # Check if LLM wants to use a tool
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -125,17 +132,17 @@ class ChatbotUI:
                     if tool_call['name'] == 'search_web':
                         # Extract the query from args
                         args = tool_call['args']
-                        print(f"Raw args: {args}")
+                        self.print_debug(f"Raw args: {args}")
 
                         if isinstance(args, dict):
                             query = args.get('query', '')
                         else:
                             query = args
 
-                        print(f"Searching for: {query}")
+                        self.print_debug(f"Searching for: {query}")
                         # Call the function directly with the string
                         result = search_web.func(query)
-                        print(f"Search result: {result}")
+                        self.print_debug(f"Search result: {result}")
 
                         # Add tool result to messages
                         messages.append(ToolMessage(
@@ -187,7 +194,7 @@ class ChatbotUI:
         return demo
 
 def main():
-    chatbot_ui = ChatbotUI()
+    chatbot_ui = ChatbotUI(debug=True)
     demo = chatbot_ui.build_interface()
     demo.launch()
 
