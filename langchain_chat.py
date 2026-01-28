@@ -132,6 +132,7 @@ class ChatbotUI:
                 print_debug(update_text, self.debug)
 
                 result = search_web.func(query, debug=self.debug)
+                print_debug("Result: " + result[:500], self.debug)
                 messages.append(
                     ToolMessage(content=result, tool_call_id=call["id"])
                 )
