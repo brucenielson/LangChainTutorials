@@ -108,9 +108,13 @@ class ChatbotUI:
     def print_debug(self, message: str):
         print_debug(message, debug=self.debug)
 
+    def format_tool_status(self, message: str) -> str:
+        return f"🔎 {message}"
+
     def run_agent(self, messages: list) -> str:
         """Run a simple agent loop that can use tools"""
         max_iterations = 5
+        tool_updates = []
 
         for i in range(max_iterations):
             # Get response from LLM
@@ -140,6 +144,12 @@ class ChatbotUI:
                             query = args
 
                         self.print_debug(f"Searching for: {query}")
+
+                        # Record tool status for UI
+                        tool_updates.append(
+                            self.format_tool_status(f'Searching the web for: "{query}"')
+                        )
+
                         # Call the function directly with the string
                         result = search_web.func(query, debug=self.debug)
                         self.print_debug(f"Search result: {result}")
@@ -153,10 +163,11 @@ class ChatbotUI:
                 continue
             else:
                 # No more tool calls, return the response
+                if tool_updates:
+                    return "\n".join(tool_updates) + "\n\n" + response.content
                 return response.content
 
         return "Max iterations reached"
-
 
     # Chat function for Gradio
     def chat(self, message, history):
