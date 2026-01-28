@@ -6,10 +6,6 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 
-# Initialize Ollama Chat Model (supports tool calling)
-llm = ChatOllama(model="llama3.1:8b")
-
-
 # Define web search function as a tool
 @tool
 def search_web(query: str) -> str:
@@ -97,93 +93,103 @@ def search_web(query: str) -> str:
         return f"Search failed: {str(e)}"
 
 
-# Bind tools to the model
-llm_with_tools = llm.bind_tools([search_web])
+class ChatbotUI:
+    def __init__(self):
+        # Initialize Ollama Chat Model (supports tool calling)
+        llm = ChatOllama(model="llama3.1:8b")
+        # Bind tools to the model
+        self.llm = llm.bind_tools([search_web])
+
+    # Simple agent loop
+    def run_agent(self, messages: list) -> str:
+        """Run a simple agent loop that can use tools"""
+        max_iterations = 5
+
+        for i in range(max_iterations):
+            # Get response from LLM
+            response = self.llm.invoke(messages)
+            messages.append(response)
+
+            # Debug: check what we got
+            print(f"Iteration {i}:")
+            print(f"Response type: {type(response)}")
+            print(f"Has tool_calls attr: {hasattr(response, 'tool_calls')}")
+            if hasattr(response, 'tool_calls'):
+                print(f"Tool calls: {response.tool_calls}")
+            print(f"Content: {response.content}")
+
+            # Check if LLM wants to use a tool
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                for tool_call in response.tool_calls:
+                    # Execute the tool
+                    if tool_call['name'] == 'search_web':
+                        # Extract the query from args
+                        args = tool_call['args']
+                        print(f"Raw args: {args}")
+
+                        if isinstance(args, dict):
+                            query = args.get('query', '')
+                        else:
+                            query = args
+
+                        print(f"Searching for: {query}")
+                        # Call the function directly with the string
+                        result = search_web.func(query)
+                        print(f"Search result: {result}")
+
+                        # Add tool result to messages
+                        messages.append(ToolMessage(
+                            content=result,
+                            tool_call_id=tool_call['id']
+                        ))
+                # Continue the loop to get the next response
+                continue
+            else:
+                # No more tool calls, return the response
+                return response.content
+
+        return "Max iterations reached"
 
 
-# Simple agent loop
-def run_agent(messages: list) -> str:
-    """Run a simple agent loop that can use tools"""
-    max_iterations = 5
+    # Chat function for Gradio
+    def chat(self, message, history):
+        try:
+            # Convert Gradio history to LangChain messages
+            messages = []
+            for chat_message in history:
+                if chat_message['role'] == 'user':
+                    messages.append(HumanMessage(content=chat_message['content']))
+                elif chat_message['role'] == 'assistant':
+                    messages.append(AIMessage(content=chat_message['content']))
 
-    for i in range(max_iterations):
-        # Get response from LLM
-        response = llm_with_tools.invoke(messages)
-        messages.append(response)
+            # Add current message
+            messages.append(HumanMessage(content=message))
 
-        # Debug: check what we got
-        print(f"Iteration {i}:")
-        print(f"Response type: {type(response)}")
-        print(f"Has tool_calls attr: {hasattr(response, 'tool_calls')}")
-        if hasattr(response, 'tool_calls'):
-            print(f"Tool calls: {response.tool_calls}")
-        print(f"Content: {response.content}")
-
-        # Check if LLM wants to use a tool
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            for tool_call in response.tool_calls:
-                # Execute the tool
-                if tool_call['name'] == 'search_web':
-                    # Extract the query from args
-                    args = tool_call['args']
-                    print(f"Raw args: {args}")
-
-                    if isinstance(args, dict):
-                        query = args.get('query', '')
-                    else:
-                        query = args
-
-                    print(f"Searching for: {query}")
-                    # Call the function directly with the string
-                    result = search_web.func(query)
-                    print(f"Search result: {result}")
-
-                    # Add tool result to messages
-                    messages.append(ToolMessage(
-                        content=result,
-                        tool_call_id=tool_call['id']
-                    ))
-            # Continue the loop to get the next response
-            continue
-        else:
-            # No more tool calls, return the response
-            return response.content
-
-    return "Max iterations reached"
+            # Run agent with full conversation history
+            response = self.run_agent(messages)
+            return response
+        except Exception as e:
+            return f"Error: {str(e)}"
 
 
-# Chat function for Gradio
-def chat(message, history):
-    try:
-        # Convert Gradio history to LangChain messages. Order is alternating human (e.g. 0) and AI (e.g. 1) messages.
-        messages = []
-        for chat_message in history:
-            if chat_message['role'] == 'user':
-                messages.append(HumanMessage(content=chat_message['content']))
-            elif chat_message['role'] == 'assistant':
-                messages.append(AIMessage(content=chat_message['content']))
+    def build_interface(self):
+        # Create Gradio interface
+        demo = gr.ChatInterface(
+            fn=self.chat,
+            title="AI Chatbot with Web Search",
+            description="Ask me anything! I'll search the web if needed.",
+            examples=[
+                "What's the weather like today?",
+                "Tell me about recent AI developments",
+                "What is LangChain?"
+            ]
+        )
+        return demo
 
-        # Add current message
-        messages.append(HumanMessage(content=message))
-
-        # Run agent with full conversation history
-        response = run_agent(messages)
-        return response
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-
-# Create Gradio interface
-demo = gr.ChatInterface(
-    fn=chat,
-    title="AI Chatbot with Web Search",
-    description="Ask me anything! I'll search the web if needed.",
-    examples=[
-        "What's the weather like today?",
-        "Tell me about recent AI developments",
-        "What is LangChain?"
-    ]
-)
+def main():
+    chatbot_ui = ChatbotUI()
+    demo = chatbot_ui.build_interface()
+    demo.launch()
 
 if __name__ == "__main__":
-    demo.launch()
+    main()
