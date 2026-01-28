@@ -141,7 +141,7 @@ class ChatbotUI:
 
                         self.print_debug(f"Searching for: {query}")
                         # Call the function directly with the string
-                        result = search_web.func(query)
+                        result = search_web.func(query, debug=self.debug)
                         self.print_debug(f"Search result: {result}")
 
                         # Add tool result to messages
@@ -194,7 +194,7 @@ class ChatbotUI:
         return demo
 
 def main():
-    chatbot_ui = ChatbotUI(debug=True)
+    chatbot_ui = ChatbotUI(debug=False)
     demo = chatbot_ui.build_interface()
     demo.launch()
 
