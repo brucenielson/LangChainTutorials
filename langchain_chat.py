@@ -4,6 +4,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 import requests
 from bs4 import BeautifulSoup
+import urllib.parse
 
 # Initialize Ollama Chat Model (supports tool calling)
 llm = ChatOllama(model="llama3.1:8b")
@@ -35,7 +36,6 @@ def search_web(query: str) -> str:
         # Extract actual URL from DuckDuckGo redirect
         # URL format: //duckduckgo.com/l/?uddg=ACTUAL_URL_ENCODED&rut=...  # noqa
         if 'uddg=' in first_url:  # noqa
-            import urllib.parse
             # Extract the uddg parameter  # noqa
             parsed = urllib.parse.urlparse(first_url if first_url.startswith('http') else 'https:' + first_url)
             params = urllib.parse.parse_qs(parsed.query)
