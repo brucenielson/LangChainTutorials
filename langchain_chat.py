@@ -2,7 +2,6 @@ import gradio as gr
 import requests
 import urllib.parse
 from bs4 import BeautifulSoup
-import json
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
