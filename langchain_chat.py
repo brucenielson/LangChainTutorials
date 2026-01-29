@@ -6,38 +6,43 @@ import json
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+import ast
 import uuid
 
+def convert_to_tool_call(raw: dict | str) -> dict:
+    """
+    Convert model-emitted tool dict/string to proper LangChain tool_call format.
+    """
+    if isinstance(raw, str):
+        try:
+            # Convert Python-like string to dict
+            raw = ast.literal_eval(raw)
+        except Exception as e:
+            return {}
 
-def convert_to_tool_call(raw: dict|str) -> dict:
-    """
-    Convert model-emitted tool JSON to proper LangChain tool_call format.
-    """
-    if isinstance(raw, str) and is_tool_call_json(raw):
-        raw = json.loads(raw)
     if isinstance(raw, dict) and "name" in raw and "parameters" in raw:
         return {
-            "id": str(uuid.uuid4()),              # unique id for this tool call
+            "id": str(uuid.uuid4()),          # unique id
             "name": raw.get("name", "unknown"),
-            "args": raw.get("parameters", {}),    # parameters become args
+            "args": raw.get("parameters", {}),# parameters become args
             "type": "tool_call"
         }
-    else:
-        return {}
+
+    return {}
 
 
-def is_tool_call_json(text: str) -> bool:
+def is_tool_call_like(text: dict|str) -> bool:
     """
-    Returns True if `text` is a JSON string representing a tool call.
+    Returns True if `text` is a string that can be converted to a tool call.
     Safe to call on any string.
     """
     text = text.strip()
     if not (text.startswith("{") and text.endswith("}")):
         return False
     try:
-        data = json.loads(text)
+        data = ast.literal_eval(text)  # safe conversion to Python dict
         return isinstance(data, dict) and "name" in data and "parameters" in data
-    except Exception:
+    except Exception as e:
         return False
 
 
@@ -142,20 +147,28 @@ class ChatbotUI:
             print_debug(f"Iteration {i} Debug:", self.debug)
             print_debug(f"  Content: {repr(content)}", self.debug)
 
-            if tool_calls:
+            if not tool_calls and is_tool_call_like(content):
+                converted = convert_to_tool_call(content)
+                if converted:
+                    tool_calls = [converted]
+
+            # Determine which tool calls to execute this iteration
+            calls_to_execute = tool_calls if tool_calls else []
+
+            if calls_to_execute:
                 print_debug(f"  Tool calls detected:", self.debug)
-                for call in tool_calls:
+                for call in calls_to_execute:
                     print_debug(f"    - Tool name: {call.get('name')}", self.debug)
                     print_debug(f"      Args: {call.get('args')}", self.debug)
             else:
                 print_debug("  No tool calls.", self.debug)
 
-            if not getattr(response, "tool_calls", None):
+            if not calls_to_execute:
                 if tool_updates:
-                    return "\n".join(tool_updates) + "\n\n" + response.content
-                return response.content
+                    return "\n".join(tool_updates) + "\n\n" + content
+                return content
 
-            for call in response.tool_calls:
+            for call in calls_to_execute:
                 if call["name"] != "search_web":
                     continue
 
