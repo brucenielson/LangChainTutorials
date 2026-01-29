@@ -9,6 +9,41 @@ from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 import ast
 import uuid
 
+
+def extract_tool_calls_and_content(response, debug: bool = False):
+    """
+    Determine what to do with a response:
+    1. If it has tool_calls, return them.
+    2. Else if content is a Python-like tool call, convert it.
+    3. Else return content as normal.
+    Returns:
+        calls_to_execute: list of tool call dicts
+        content_to_return: string content (only used if calls_to_execute is empty)
+    """
+    content = getattr(response, "content", "")
+    tool_calls = getattr(response, "tool_calls", [])
+
+    print_debug(f"  Content: {repr(content)}", debug)
+
+    if not tool_calls and is_tool_call_like(content):
+        converted = convert_to_tool_call(content)
+        if converted:
+            tool_calls = [converted]
+            print_debug(f"  Converted content to tool_call: {converted}", debug)
+
+    calls_to_execute = tool_calls if tool_calls else []
+
+    if calls_to_execute:
+        print_debug(f"  Tool calls detected:", debug)
+        for call in calls_to_execute:
+            print_debug(f"    - Tool name: {call.get('name')}", debug)
+            print_debug(f"      Args: {call.get('args')}", debug)
+        return calls_to_execute, None  # content not used if we have tool calls
+    else:
+        print_debug("  No tool calls.", debug)
+        return [], content  # return content if no tool calls
+
+
 def convert_to_tool_call(raw: dict | str) -> dict:
     """
     Convert model-emitted tool dict/string to proper LangChain tool_call format.
@@ -140,33 +175,14 @@ class ChatbotUI:
             response = self.llm.invoke(messages)
             messages.append(response)
 
-            # Improved debug
-            content = getattr(response, "content", "")
-            tool_calls = getattr(response, "tool_calls", [])
-
             print_debug(f"Iteration {i} Debug:", self.debug)
-            print_debug(f"  Content: {repr(content)}", self.debug)
 
-            if not tool_calls and is_tool_call_like(content):
-                converted = convert_to_tool_call(content)
-                if converted:
-                    tool_calls = [converted]
-
-            # Determine which tool calls to execute this iteration
-            calls_to_execute = tool_calls if tool_calls else []
-
-            if calls_to_execute:
-                print_debug(f"  Tool calls detected:", self.debug)
-                for call in calls_to_execute:
-                    print_debug(f"    - Tool name: {call.get('name')}", self.debug)
-                    print_debug(f"      Args: {call.get('args')}", self.debug)
-            else:
-                print_debug("  No tool calls.", self.debug)
+            calls_to_execute, content_to_return = extract_tool_calls_and_content(response, debug=self.debug)
 
             if not calls_to_execute:
                 if tool_updates:
-                    return "\n".join(tool_updates) + "\n\n" + content
-                return content
+                    return "\n".join(tool_updates) + "\n\n" + (content_to_return or "")
+                return content_to_return or ""
 
             for call in calls_to_execute:
                 if call["name"] != "search_web":
