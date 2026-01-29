@@ -2,10 +2,43 @@ import gradio as gr
 import requests
 import urllib.parse
 from bs4 import BeautifulSoup
-
+import json
 from langchain_ollama import ChatOllama
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+import uuid
+
+
+def convert_to_tool_call(raw: dict|str) -> dict:
+    """
+    Convert model-emitted tool JSON to proper LangChain tool_call format.
+    """
+    if isinstance(raw, str) and is_tool_call_json(raw):
+        raw = json.loads(raw)
+    if isinstance(raw, dict) and "name" in raw and "parameters" in raw:
+        return {
+            "id": str(uuid.uuid4()),              # unique id for this tool call
+            "name": raw.get("name", "unknown"),
+            "args": raw.get("parameters", {}),    # parameters become args
+            "type": "tool_call"
+        }
+    else:
+        return {}
+
+
+def is_tool_call_json(text: str) -> bool:
+    """
+    Returns True if `text` is a JSON string representing a tool call.
+    Safe to call on any string.
+    """
+    text = text.strip()
+    if not (text.startswith("{") and text.endswith("}")):
+        return False
+    try:
+        data = json.loads(text)
+        return isinstance(data, dict) and "name" in data and "parameters" in data
+    except Exception:
+        return False
 
 
 def print_debug(message: str, debug: bool):
